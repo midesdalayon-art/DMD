@@ -1,0 +1,316 @@
+// DMD Resort Management System DBML
+// Source: live PostgreSQL schema `dmdresort` + Laravel migrations
+// Excludes framework tables: cache, cache_locks, failed_jobs, job_batches, jobs,
+// migrations, password_reset_tokens, personal_access_tokens, sessions
+
+Table users {
+  id bigint [pk, increment]
+  name varchar
+  email varchar [unique]
+  email_verified_at timestamp
+  password varchar
+  remember_token varchar
+  role varchar
+  first_name varchar
+  last_name varchar
+  contact_number varchar
+  is_active boolean
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table accommodations {
+  id bigint [pk, increment]
+  name varchar
+  slug varchar [unique]
+  type varchar
+  capacity int
+  price_per_night numeric
+  description text
+  status varchar
+  image_path varchar
+  housekeeping_status varchar
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table accommodation_images {
+  id bigint [pk, increment]
+  accommodation_id bigint [not null, ref: > accommodations.id]
+  image_path varchar
+  is_primary boolean
+  sort_order smallint
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table amenities {
+  id bigint [pk, increment]
+  name varchar [unique]
+  icon varchar
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table accommodation_amenity {
+  accommodation_id bigint [pk, ref: > accommodations.id]
+  amenity_id bigint [pk, ref: > amenities.id]
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table reservations {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  accommodation_id bigint [not null, ref: > accommodations.id]
+  check_in date
+  check_out date
+  guests int
+  total_amount numeric
+  status varchar
+  booking_reference varchar [unique]
+  cancellation_reason text
+  cancelled_at timestamp
+  adults int
+  children int
+  infants int
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table reservation_payments {
+  id bigint [pk, increment]
+  reservation_id bigint [not null, ref: > reservations.id]
+  provider varchar
+  provider_reference varchar
+  checkout_session_id varchar [unique]
+  checkout_url text
+  payment_id varchar [unique]
+  amount bigint
+  currency varchar
+  status varchar
+  payment_method varchar
+  paid_at timestamp
+  raw_reference varchar
+  payload json
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table paymongo_webhook_events {
+  id bigint [pk, increment]
+  event_id varchar [unique]
+  event_type varchar
+  resource_id varchar
+  payload json
+  processed_at timestamp
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table chatbot_categories {
+  id bigint [pk, increment]
+  name varchar
+  slug varchar [unique]
+  icon varchar
+  sort_order int
+  is_active boolean
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table chatbot_rules {
+  id bigint [pk, increment]
+  category_id bigint [not null, ref: > chatbot_categories.id]
+  question varchar
+  answer text
+  keywords json
+  priority int
+  is_active boolean
+  created_by bigint [ref: > users.id]
+  updated_by bigint [ref: > users.id]
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table chat_conversations {
+  id bigint [pk, increment]
+  conversation_uuid uuid [unique]
+  access_token varchar [unique]
+  customer_id bigint [ref: > users.id]
+  guest_name varchar
+  guest_email varchar
+  status varchar
+  assigned_to bigint [ref: > users.id]
+  escalated_at timestamp
+  resolved_at timestamp
+  last_message_at timestamp
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table chat_messages {
+  id bigint [pk, increment]
+  conversation_id bigint [not null, ref: > chat_conversations.id]
+  sender_type varchar
+  sender_user_id bigint [ref: > users.id]
+  message text
+  message_type varchar
+  chatbot_rule_id bigint [ref: > chatbot_rules.id]
+  is_read boolean
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table inventory_assets {
+  id bigint [pk, increment]
+  name varchar
+  category varchar
+  asset_code varchar [unique]
+  quantity int
+  condition varchar
+  status varchar
+  location_type varchar
+  accommodation_id bigint [ref: > accommodations.id]
+  location_name varchar
+  acquisition_date date
+  purchase_cost numeric
+  description text
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table inventory_asset_histories {
+  id bigint [pk, increment]
+  inventory_asset_id bigint [not null, ref: > inventory_assets.id]
+  performed_by bigint [ref: > users.id]
+  action varchar
+  old_value json
+  new_value json
+  remarks text
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table housekeeping_tasks {
+  id bigint [pk, increment]
+  accommodation_id bigint [not null, ref: > accommodations.id]
+  assigned_to bigint [ref: > users.id]
+  created_by bigint [not null, ref: > users.id]
+  task_type varchar
+  priority varchar
+  status varchar
+  scheduled_at timestamp
+  started_at timestamp
+  completed_at timestamp
+  remarks text
+  maintenance_notes text
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table housekeeping_task_histories {
+  id bigint [pk, increment]
+  housekeeping_task_id bigint [not null, ref: > housekeeping_tasks.id]
+  performed_by bigint [ref: > users.id]
+  action varchar
+  old_value json
+  new_value json
+  remarks text
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table attendance_records {
+  id bigint [pk, increment]
+  user_id bigint [not null, ref: > users.id]
+  attendance_date date
+  time_in time
+  time_out time
+  status varchar
+  verification_method varchar
+  device_id varchar
+  remarks text
+  corrected_by bigint [ref: > users.id]
+  corrected_at timestamp
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table attendance_record_histories {
+  id bigint [pk, increment]
+  attendance_record_id bigint [not null, ref: > attendance_records.id]
+  performed_by bigint [ref: > users.id]
+  action varchar
+  old_value json
+  new_value json
+  remarks text
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table announcements {
+  id bigint [pk, increment]
+  title varchar
+  content text
+  type varchar
+  audience varchar
+  status varchar
+  publish_at timestamp
+  expires_at timestamp
+  created_by bigint [not null, ref: > users.id]
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table audit_logs {
+  id bigint [pk, increment]
+  user_id bigint [ref: > users.id]
+  action varchar
+  module varchar
+  description varchar
+  entity_type varchar
+  entity_id bigint
+  ip_address varchar
+  request_method varchar
+  metadata json
+  created_at timestamp
+  updated_at timestamp
+}
+
+Table system_settings {
+  id bigint [pk, increment]
+  key varchar [unique]
+  value json
+  created_at timestamp
+  updated_at timestamp
+}
+
+Ref: reservations.user_id > users.id
+Ref: reservations.accommodation_id > accommodations.id
+Ref: reservation_payments.reservation_id > reservations.id
+Ref: accommodation_images.accommodation_id > accommodations.id
+Ref: accommodation_amenity.accommodation_id > accommodations.id
+Ref: accommodation_amenity.amenity_id > amenities.id
+Ref: inventory_assets.accommodation_id > accommodations.id
+Ref: inventory_asset_histories.inventory_asset_id > inventory_assets.id
+Ref: inventory_asset_histories.performed_by > users.id
+Ref: housekeeping_tasks.accommodation_id > accommodations.id
+Ref: housekeeping_tasks.assigned_to > users.id
+Ref: housekeeping_tasks.created_by > users.id
+Ref: housekeeping_task_histories.housekeeping_task_id > housekeeping_tasks.id
+Ref: housekeeping_task_histories.performed_by > users.id
+Ref: attendance_records.user_id > users.id
+Ref: attendance_records.corrected_by > users.id
+Ref: attendance_record_histories.attendance_record_id > attendance_records.id
+Ref: attendance_record_histories.performed_by > users.id
+Ref: announcements.created_by > users.id
+Ref: audit_logs.user_id > users.id
+Ref: chatbot_rules.category_id > chatbot_categories.id
+Ref: chatbot_rules.created_by > users.id
+Ref: chatbot_rules.updated_by > users.id
+Ref: chat_conversations.customer_id > users.id
+Ref: chat_conversations.assigned_to > users.id
+Ref: chat_messages.conversation_id > chat_conversations.id
+Ref: chat_messages.sender_user_id > users.id
+Ref: chat_messages.chatbot_rule_id > chatbot_rules.id

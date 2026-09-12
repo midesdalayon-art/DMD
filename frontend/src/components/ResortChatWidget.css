@@ -1,0 +1,358 @@
+.resort-chat-widget {
+  position: fixed !important;
+  right: 24px !important;
+  bottom: 24px !important;
+  z-index: 2147483647 !important;
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.resort-chat-launcher {
+  position: relative !important;
+  min-height: 52px;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(36, 81, 64, 0.18);
+  border-radius: 999px;
+  padding: 0 16px 0 14px;
+  background: linear-gradient(180deg, var(--forest), var(--forest-dark));
+  color: #fff;
+  box-shadow: 0 18px 34px rgba(31, 42, 36, 0.24);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 800;
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease;
+}
+
+.resort-chat-launcher:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 22px 40px rgba(31, 42, 36, 0.28);
+}
+
+.resort-chat-launcher:focus-visible {
+  outline: 3px solid rgba(36, 81, 64, 0.22);
+  outline-offset: 3px;
+}
+
+.resort-chat-launcher svg {
+  flex: 0 0 auto;
+}
+
+.resort-chat-panel {
+  position: relative;
+  width: min(400px, calc(100vw - 32px));
+  max-height: min(600px, calc(100dvh - 112px));
+  display: grid !important;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
+  border: 1px solid rgba(36, 81, 64, 0.16);
+  border-radius: 22px;
+  background: #ffffff;
+  box-shadow: 0 24px 72px rgba(31, 42, 36, 0.22);
+  pointer-events: auto;
+}
+
+.resort-chat-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid #ede7dc;
+  background: linear-gradient(180deg, #fff, #faf8f2);
+}
+
+.resort-chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.resort-chat-header strong,
+.resort-chat-header span {
+  display: block;
+}
+
+.resort-chat-header strong {
+  color: var(--forest-dark);
+  font-size: 0.98rem;
+  font-weight: 860;
+}
+
+.resort-chat-header span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 680;
+}
+
+.resort-chat-header button {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(36, 81, 64, 0.16);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--forest-dark);
+  cursor: pointer;
+}
+
+.resort-chat-header-actions button {
+  width: 34px;
+  height: 34px;
+}
+
+.resort-chat-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+  background: #fbfaf7;
+}
+
+.resort-chat-empty {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  min-height: 160px;
+  padding: 18px 12px;
+  border: 1px dashed #d9e3da;
+  border-radius: 18px;
+  background: #fff;
+  text-align: center;
+  color: var(--muted);
+}
+
+.resort-chat-empty p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+.resort-chat-message {
+  display: grid;
+  gap: 4px;
+  max-width: 88%;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: #fff;
+  border: 1px solid #e7e2d8;
+  box-shadow: 0 10px 22px rgba(31, 42, 36, 0.05);
+}
+
+.resort-chat-message strong {
+  color: var(--forest-dark);
+  font-size: 0.72rem;
+  font-weight: 860;
+}
+
+.resort-chat-message p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.resort-chat-message.is-bot,
+.resort-chat-message.is-system {
+  background: #f1f6f1;
+  border-color: rgba(36, 81, 64, 0.12);
+}
+
+.resort-chat-message.is-guest,
+.resort-chat-message.is-customer {
+  margin-left: auto;
+  background: #ffffff;
+}
+
+.resort-chat-message.is-staff {
+  margin-right: auto;
+}
+
+.resort-chat-error {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff4f2;
+  color: #9f1239;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.resort-chat-quick-replies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px 0;
+  background: #fbfaf7;
+}
+
+.resort-chat-bot-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+
+.resort-chat-quick-replies button {
+  min-height: 32px;
+  border: 1px solid #dbe6db;
+  border-radius: 999px;
+  padding: 0 12px;
+  background: #fff;
+  color: var(--forest-dark);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.resort-chat-bot-options button {
+  min-height: 32px;
+  border: 1px solid rgba(36, 81, 64, 0.18);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: #eef5ef;
+  color: var(--forest-dark);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.resort-chat-quick-replies button:hover {
+  border-color: rgba(36, 81, 64, 0.22);
+  background: #f1f6f1;
+}
+
+.resort-chat-bot-options button:hover {
+  border-color: rgba(36, 81, 64, 0.28);
+  background: #e4efe5;
+}
+
+.resort-chat-input {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid #ede7dc;
+  background: #fff;
+}
+
+.resort-chat-input input {
+  flex: 1;
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid #d9e3da;
+  border-radius: 999px;
+  padding: 0 14px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.resort-chat-input input:focus {
+  outline: 3px solid rgba(36, 81, 64, 0.16);
+  border-color: rgba(36, 81, 64, 0.34);
+}
+
+.resort-chat-input button {
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: var(--forest);
+  color: #fff;
+  cursor: pointer;
+}
+
+.resort-chat-input button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.resort-chat-reset-confirm {
+  position: absolute;
+  inset: auto 14px 64px 14px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(36, 81, 64, 0.16);
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 22px 50px rgba(31, 42, 36, 0.18);
+}
+
+.resort-chat-reset-confirm p {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.resort-chat-reset-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.resort-chat-reset-actions button {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid rgba(36, 81, 64, 0.16);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--forest-dark);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.resort-chat-reset-actions .is-primary {
+  border-color: var(--forest);
+  background: var(--forest);
+  color: #fff;
+}
+
+@media (max-width: 767px) {
+  .resort-chat-widget {
+    right: 12px !important;
+    bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .resort-chat-launcher {
+    min-height: 48px;
+    padding: 0 14px;
+    font-size: 0.82rem;
+  }
+
+  .resort-chat-launcher span {
+    display: none;
+  }
+
+  .resort-chat-panel {
+    width: min(100vw - 24px, 420px);
+    max-height: min(72dvh, 620px);
+    border-radius: 18px;
+  }
+
+  .resort-chat-reset-confirm {
+    inset: auto 12px 60px 12px;
+  }
+}
