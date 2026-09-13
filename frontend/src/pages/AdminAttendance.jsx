@@ -2,15 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createAdminAttendanceRecord,
   createAdminEmployee,
-  assignAdminFingerprint,
   deleteAdminEmployee,
-  deleteFingerprintOnBridge,
   deleteFingerprintForAdminEmployee,
-  enrollFingerprintOnBridge,
-  getAdminFingerprintSlot,
+  getFingerprintEnrollment,
   getAdminAttendanceRecord,
   getAdminAttendanceRecords,
   getAdminEmployees,
+  startFingerprintEnrollment,
+  cancelFingerprintEnrollment,
   updateAdminAttendanceRecord,
   updateAdminEmployee,
 } from '../lib/api'
@@ -87,6 +86,7 @@ function AdminAttendance() {
   const [attendancePage, setAttendancePage] = useState(1)
   const [fingerprintOperation, setFingerprintOperation] = useState(null)
   const fingerprintActionInFlight = useRef(false)
+  const fingerprintCancelRequested = useRef(false)
   const employeeActionHandled = useRef(false)
   const attendanceLoadInFlight = useRef(false)
 
@@ -402,28 +402,65 @@ function AdminAttendance() {
 
   async function enrollFingerprint(employee) {
     if (fingerprintOperation) return
-    setFingerprintOperation({ employeeId: employee.id, label: 'Preparing scanner...' })
+    fingerprintCancelRequested.current = false
+    setFingerprintOperation({ employeeId: employee.id, operationId: null, label: 'Preparing enrollment...' })
     setPageError('')
     setPageMessage('')
 
     try {
-      const slot = await getAdminFingerprintSlot()
-      setFingerprintOperation({ employeeId: employee.id, label: 'Place finger firmly on scanner...' })
-      const bridgeResult = await enrollFingerprintOnBridge(slot)
-      setFingerprintOperation({ employeeId: employee.id, label: 'Saving fingerprint mapping...' })
-      try {
-        const result = await assignAdminFingerprint(employee.id, slot)
-        setPageMessage(result.message)
-        await loadData()
-      } catch (mappingError) {
-        try { await deleteFingerprintOnBridge(slot) } catch { /* surface the original consistency failure */ }
-        throw new Error(`Fingerprint enrolled but employee mapping failed. Sensor cleanup was attempted. ${mappingError.message}`)
+      const operation = await startFingerprintEnrollment(employee.id)
+      setFingerprintOperation({
+        employeeId: employee.id,
+        operationId: operation.id,
+        fingerprintId: operation.fingerprint_id,
+        label: 'Waiting for the local bridge and scanner...',
+      })
+
+      const deadline = Date.now() + 190000
+      while (Date.now() < deadline) {
+        if (fingerprintCancelRequested.current) {
+          throw new Error('Fingerprint enrollment cancelled.')
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, 2000))
+        const current = await getFingerprintEnrollment(operation.id)
+        if (current.status === 'pending') {
+          setFingerprintOperation((previous) => previous ? { ...previous, label: 'Waiting for the local bridge and scanner...' } : previous)
+        } else if (current.status === 'claimed') {
+          setFingerprintOperation((previous) => previous ? { ...previous, label: 'Place the same finger on the scanner when prompted...' } : previous)
+        } else if (current.status === 'succeeded') {
+          setPageMessage('Fingerprint enrolled successfully.')
+          await loadData()
+          return
+        } else if (current.status === 'cancelled') {
+          throw new Error(current.message || 'Fingerprint enrollment cancelled.')
+        } else if (current.status === 'failed') {
+          throw new Error(current.message || 'Fingerprint enrollment failed.')
+        }
       }
-      if (!bridgeResult.ok) throw new Error('Scanner enrollment did not complete.')
+
+      throw new Error('Fingerprint enrollment timed out. Confirm the bridge and Arduino are connected, then try again.')
     } catch (error) {
-      setPageError(error.message || 'Fingerprint enrollment failed.')
+      if (!fingerprintCancelRequested.current) {
+        setPageError(error.message || 'Fingerprint enrollment failed.')
+      }
     } finally {
+      fingerprintCancelRequested.current = false
       setFingerprintOperation(null)
+    }
+  }
+
+  async function cancelEnrollment() {
+    const operationId = fingerprintOperation?.operationId
+    if (!operationId) return
+
+    fingerprintCancelRequested.current = true
+    try {
+      await cancelFingerprintEnrollment(operationId)
+      setPageMessage('Fingerprint enrollment cancelled.')
+      setFingerprintOperation(null)
+    } catch (error) {
+      setPageError(error.message || 'The active enrollment could not be cancelled.')
     }
   }
 
@@ -693,7 +730,10 @@ function AdminAttendance() {
       </section>
 
       {fingerprintOperation ? (
-        <ToastMessage type="info" message={`Fingerprint operation for ${employees.find((employee) => employee.id === fingerprintOperation.employeeId)?.name ?? 'employee'}: ${fingerprintOperation.label}`} />
+        <div className="admin-inline-alert" role="status">
+          <span>Fingerprint enrollment for {employees.find((employee) => employee.id === fingerprintOperation.employeeId)?.name ?? 'employee'}: {fingerprintOperation.label}</span>
+          {fingerprintOperation.operationId ? <button type="button" onClick={cancelEnrollment}>Cancel</button> : null}
+        </div>
       ) : null}
 
       {isDrawerOpen && drawerMode === 'employee' ? (

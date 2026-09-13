@@ -173,6 +173,63 @@ employee server-side and retains repeat-scan protection. If realtime is not
 available, `/admin/attendance` polls the authenticated attendance API every
 10 seconds and also has a manual Refresh action.
 
+### Fingerprint enrollment
+
+Enrollment must not be proxied from Railway to `127.0.0.1` and the deployed
+browser must not be given either IoT secret. The production flow is:
+
+```text
+Admin browser -> Railway creates a short-lived enrollment operation
+Local bridge -> signed HTTPS claim request to Railway
+Local bridge -> Arduino COM port using ENROLL:<slot>
+Local bridge -> signed HTTPS completion request to Railway
+Railway -> stores the employee fingerprint_id
+Admin browser -> polls the operation and refreshes Employees
+```
+
+The operation is limited to one active enrollment, expires automatically, is
+bound to the employee and server-allocated sensor slot, and only an
+authenticated Admin can start or cancel it. Completion is accepted only from
+the signed configured IoT device and is idempotent. The bridge never sends
+biometric data to Laravel; the sensor keeps its own template and Laravel stores
+only the sensor template ID mapping.
+
+Add this local-only setting to `iot-bridge/.env` on the PC connected to the
+Arduino (the file is ignored and must never be committed):
+
+```text
+DMD_IOT_ENROLLMENT_API_URL=https://dmd-production-5759.up.railway.app/api/iot/fingerprint-enrollment
+DMD_IOT_ENROLLMENT_POLL_SECONDS=2
+```
+
+Keep `DMD_IOT_DEVICE_ID` and `DMD_IOT_DEVICE_KEY` aligned with Railway's
+dedicated IoT device configuration. The existing attendance URL and settings
+remain unchanged. The bridge claims these exact signed operation endpoints:
+
+```text
+POST /api/iot/fingerprint-enrollment/jobs/claim
+POST /api/iot/fingerprint-enrollment/jobs/{operation_id}/complete
+```
+
+The Admin UI uses these authenticated endpoints through the Vercel `/api`
+proxy:
+
+```text
+POST /api/admin/iot/fingerprint-enrollments
+GET  /api/admin/iot/fingerprint-enrollments/{operation_id}
+POST /api/admin/iot/fingerprint-enrollments/{operation_id}/cancel
+```
+
+Start the bridge on Windows with:
+
+```text
+iot-bridge\\start_bridge.bat
+```
+
+Confirm `http://127.0.0.1:8765/status` reports `serial_connected: true` for
+local diagnostics. Production enrollment itself uses the bridge's outbound
+HTTPS polling, so Vercel does not need to access the local HTTP port.
+
 ## Google OAuth setup
 
 The existing routes are:

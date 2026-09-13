@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\Admin\AmenityController as AdminAmenityController;
 use App\Http\Controllers\Api\Admin\AnnouncementController as AdminAnnouncementController;
 use App\Http\Controllers\Api\Admin\AttendanceRecordController as AdminAttendanceRecordController;
 use App\Http\Controllers\Api\Iot\FingerprintAttendanceController;
+use App\Http\Controllers\Api\Admin\FingerprintEnrollmentController;
 use App\Http\Controllers\Api\Admin\EmployeeController as AdminEmployeeController;
 use App\Http\Controllers\Api\Admin\DashboardController;
 use App\Http\Controllers\Api\Admin\HousekeepingTaskController as AdminHousekeepingTaskController;
@@ -104,6 +105,9 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::post('/iot/fingerprints/enroll', [\App\Http\Controllers\Api\Admin\IotBridgeController::class, 'enroll']);
         Route::post('/iot/fingerprints/delete', [\App\Http\Controllers\Api\Admin\IotBridgeController::class, 'delete']);
         Route::post('/iot/fingerprints/delete-for-employee/{employee}', [\App\Http\Controllers\Api\Admin\IotBridgeController::class, 'deleteForEmployee']);
+        Route::post('/iot/fingerprint-enrollments', [FingerprintEnrollmentController::class, 'start']);
+        Route::get('/iot/fingerprint-enrollments/{operation}', [FingerprintEnrollmentController::class, 'status']);
+        Route::post('/iot/fingerprint-enrollments/{operation}/cancel', [FingerprintEnrollmentController::class, 'cancel']);
         Route::apiResource('/attendance-records', AdminAttendanceRecordController::class)->except(['destroy']);
         Route::get('/reports', [AdminReportController::class, 'summary']);
         Route::get('/reports/export', [AdminReportController::class, 'export']);
@@ -192,3 +196,8 @@ Route::middleware('auth:sanctum')->group(function () {
 
 Route::post('/iot/attendance/fingerprint', [FingerprintAttendanceController::class, 'store'])
     ->middleware(['iot.device', 'throttle:iot-attendance']);
+
+Route::post('/iot/fingerprint-enrollment/jobs/claim', [FingerprintEnrollmentController::class, 'claim'])
+    ->middleware('iot.device');
+Route::post('/iot/fingerprint-enrollment/jobs/{operation}/complete', [FingerprintEnrollmentController::class, 'complete'])
+    ->middleware('iot.device');

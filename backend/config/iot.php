@@ -22,5 +22,6 @@ return [
     'bridge_url' => rtrim((string) env('IOT_BRIDGE_URL', 'http://127.0.0.1:8765'), '/'),
     'bridge_control_key' => env('IOT_BRIDGE_CONTROL_KEY'),
     'bridge_http_timeout' => (int) env('IOT_BRIDGE_HTTP_TIMEOUT', 20),
+    'enrollment_operation_ttl_seconds' => (int) env('IOT_ENROLLMENT_OPERATION_TTL_SECONDS', 180),
     'fingerprint_duplicate_window_seconds' => (int) env('IOT_FINGERPRINT_DUPLICATE_WINDOW_SECONDS', 60),
 ];

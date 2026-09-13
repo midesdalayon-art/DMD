@@ -108,6 +108,54 @@ class FingerprintBridgeSecurityTest(unittest.TestCase):
         self.assertIn("serial_port", payload)
         self.assertIn("uptime_seconds", payload)
 
+    def test_enrollment_result_uses_signed_https_completion_request(self):
+        old_base_url = bridge.ENROLLMENT_API_BASE_URL
+        old_retry_count = bridge.API_RETRY_COUNT
+        bridge.ENROLLMENT_API_BASE_URL = "https://example.test/api/iot/fingerprint-enrollment"
+        bridge.API_RETRY_COUNT = 0
+        response = Mock(status_code=200, ok=True)
+        try:
+            with patch.object(bridge, "run_serial_operation", return_value={
+                "status": 200,
+                "ok": True,
+                "message": "ENROLL_OK:7",
+            }), patch.object(bridge.requests, "post", return_value=response) as post:
+                bridge.process_enrollment_job({"id": "operation-7", "fingerprint_id": 7})
+        finally:
+            bridge.ENROLLMENT_API_BASE_URL = old_base_url
+            bridge.API_RETRY_COUNT = old_retry_count
+
+        self.assertEqual(post.call_count, 1)
+        self.assertEqual(
+            post.call_args.args[0],
+            "https://example.test/api/iot/fingerprint-enrollment/jobs/operation-7/complete",
+        )
+        body = post.call_args.kwargs["data"]
+        self.assertEqual(json.loads(body), {"ok": True, "message": "ENROLL_OK:7"})
+        self.assertIn("X-Device-Signature", post.call_args.kwargs["headers"])
+
+    def test_enrollment_result_reports_failure_without_leaking_serial_data(self):
+        old_base_url = bridge.ENROLLMENT_API_BASE_URL
+        old_retry_count = bridge.API_RETRY_COUNT
+        bridge.ENROLLMENT_API_BASE_URL = "https://example.test/api/iot/fingerprint-enrollment"
+        bridge.API_RETRY_COUNT = 0
+        response = Mock(status_code=200, ok=True)
+        try:
+            with patch.object(bridge, "run_serial_operation", return_value={
+                "status": 504,
+                "ok": False,
+                "error": "Operation timed out waiting for Arduino.",
+                "lines": ["private sensor prompt"],
+            }), patch.object(bridge.requests, "post", return_value=response) as post:
+                bridge.process_enrollment_job({"id": "operation-8", "fingerprint_id": 8})
+        finally:
+            bridge.ENROLLMENT_API_BASE_URL = old_base_url
+            bridge.API_RETRY_COUNT = old_retry_count
+
+        payload = json.loads(post.call_args.kwargs["data"])
+        self.assertEqual(payload, {"ok": False, "message": "Operation timed out waiting for Arduino."})
+        self.assertNotIn("private sensor prompt", post.call_args.kwargs["data"].decode())
+
     def test_non_windows_single_instance_helper_is_available(self):
         if os.name != "nt":
             self.assertTrue(bridge.acquire_single_instance())

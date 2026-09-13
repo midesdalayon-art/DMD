@@ -56,6 +56,10 @@ configure_log_file()
 BRIDGE_VERSION = "phase5"
 BAUD_RATE = 115200
 API_URL = os.getenv("DMD_IOT_API_URL", "http://127.0.0.1:8000/api/iot/attendance/fingerprint")
+ENROLLMENT_API_BASE_URL = os.getenv(
+    "DMD_IOT_ENROLLMENT_API_URL",
+    API_URL.removesuffix("/attendance/fingerprint") + "/fingerprint-enrollment",
+).rstrip("/")
 DEVICE_KEY = os.getenv("DMD_IOT_DEVICE_KEY")
 DEVICE_ID = os.getenv("DMD_IOT_DEVICE_ID", "mega-as608-01")
 BRIDGE_HOST = "127.0.0.1"
@@ -65,6 +69,7 @@ CONFIGURED_SERIAL_PORT = os.getenv("DMD_IOT_SERIAL_PORT", "").strip() or None
 API_TIMEOUT_SECONDS = float(os.getenv("DMD_IOT_API_TIMEOUT_SECONDS", "5"))
 API_RETRY_COUNT = max(0, int(os.getenv("DMD_IOT_API_RETRY_COUNT", "1")))
 API_RETRY_DELAY_SECONDS = max(0.0, float(os.getenv("DMD_IOT_API_RETRY_DELAY_SECONDS", "0.25")))
+ENROLLMENT_POLL_SECONDS = max(1.0, float(os.getenv("DMD_IOT_ENROLLMENT_POLL_SECONDS", "2")))
 OPERATION_TIMEOUT_SECONDS = 100
 DELETE_OPERATION_TIMEOUT_SECONDS = int(os.getenv("DMD_IOT_DELETE_TIMEOUT_SECONDS", "15"))
 AUTO_DETECT_SERIAL = os.getenv("DMD_IOT_AUTO_DETECT_SERIAL", "true").lower() in {"1", "true", "yes", "on"}
@@ -78,6 +83,7 @@ last_api_status = None
 last_api_error = None
 last_serial_error = None
 _single_instance_handle = None
+enrollment_stop_event = threading.Event()
 
 PLAUSIBLE_SERIAL_TERMS = (
     "arduino",
@@ -207,6 +213,16 @@ def is_valid_bridge_control_key(provided):
     return bool(BRIDGE_CONTROL_KEY) and hmac.compare_digest(provided, BRIDGE_CONTROL_KEY)
 
 
+def signed_json_post(url, payload):
+    body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    signed_headers = build_device_headers("POST", url, body)
+    return requests.post(url, headers={
+        **signed_headers,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }, data=body, timeout=API_TIMEOUT_SECONDS)
+
+
 def send_fingerprint_match(fingerprint_id, confidence):
     global last_successful_attendance_at, last_api_status, last_api_error
 
@@ -287,13 +303,16 @@ def send_fingerprint_match(fingerprint_id, confidence):
     print(f"Confidence: {payload.get('confidence', confidence)}\n-----------------------------")
 
 
-def run_serial_operation(command, success_prefix, failure_prefix, timeout_seconds=None):
+def run_serial_operation(command, success_prefix, failure_prefix, timeout_seconds=None, lock_already_held=False):
     global last_serial_error
 
     if ser is None or not ser.is_open:
         return {"status": 503, "ok": False, "error": "Arduino serial connection is unavailable."}
-    if not operation_lock.acquire(blocking=False):
-        return {"status": 409, "ok": False, "error": "Fingerprint bridge is busy."}
+    acquired_lock = False
+    if not lock_already_held:
+        if not operation_lock.acquire(blocking=False):
+            return {"status": 409, "ok": False, "error": "Fingerprint bridge is busy."}
+        acquired_lock = True
     lines = []
     try:
         ser.reset_input_buffer()
@@ -316,7 +335,91 @@ def run_serial_operation(command, success_prefix, failure_prefix, timeout_second
         last_serial_error = str(error)[:240]
         return {"status": 503, "ok": False, "lines": lines, "error": f"Arduino connection failed: {error}"}
     finally:
-        operation_lock.release()
+        if acquired_lock:
+            operation_lock.release()
+
+
+def process_enrollment_job(job):
+    """Run one server-assigned enrollment and report only its outcome."""
+    try:
+        fingerprint_id = int(job["fingerprint_id"])
+        operation_id = str(job["id"])
+    except (KeyError, TypeError, ValueError):
+        print("Laravel returned an invalid fingerprint enrollment job.")
+        return
+
+    result = run_serial_operation(
+        f"ENROLL:{fingerprint_id}",
+        "ENROLL_OK:",
+        "ENROLL_FAILED:",
+        lock_already_held=True,
+    )
+    message = result.get("message") or result.get("error") or "Fingerprint enrollment failed."
+    completion_url = f"{ENROLLMENT_API_BASE_URL}/jobs/{operation_id}/complete"
+
+    for attempt in range(API_RETRY_COUNT + 1):
+        try:
+            response = signed_json_post(completion_url, {"ok": bool(result.get("ok")), "message": message})
+        except requests.RequestException as error:
+            if attempt < API_RETRY_COUNT:
+                time.sleep(API_RETRY_DELAY_SECONDS)
+                continue
+            print(f"Could not report fingerprint enrollment result to Laravel: {error.__class__.__name__}")
+            return
+
+        if response.status_code in {408, 429, 500, 502, 503, 504} and attempt < API_RETRY_COUNT:
+            time.sleep(API_RETRY_DELAY_SECONDS)
+            continue
+        break
+
+    if response.ok:
+        if result.get("ok"):
+            print(f"Fingerprint enrollment completed for sensor ID {fingerprint_id}.")
+        else:
+            print(f"Fingerprint enrollment failed: {message}")
+    else:
+        print(f"Laravel rejected the fingerprint enrollment result (HTTP {response.status_code}).")
+
+
+def enrollment_worker():
+    """Poll Railway so the browser never needs to control the local HTTP server."""
+    claim_url = f"{ENROLLMENT_API_BASE_URL}/jobs/claim"
+
+    while not enrollment_stop_event.is_set():
+        if ser is None or not ser.is_open:
+            enrollment_stop_event.wait(ENROLLMENT_POLL_SECONDS)
+            continue
+
+        if not operation_lock.acquire(blocking=False):
+            enrollment_stop_event.wait(0.2)
+            continue
+
+        try:
+            try:
+                response = signed_json_post(claim_url, {})
+            except requests.RequestException as error:
+                if not enrollment_stop_event.is_set():
+                    print(f"Enrollment polling unavailable: {error.__class__.__name__}")
+                response = None
+
+            if response is None:
+                pass
+            elif response.status_code == 204:
+                pass
+            elif response.status_code != 200:
+                print(f"Enrollment polling returned HTTP {response.status_code}.")
+            else:
+                try:
+                    job = (response.json() or {}).get("data")
+                except ValueError:
+                    job = None
+                if job:
+                    process_enrollment_job(job)
+        finally:
+            if operation_lock.locked():
+                operation_lock.release()
+
+        enrollment_stop_event.wait(ENROLLMENT_POLL_SECONDS)
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
@@ -401,6 +504,9 @@ def main():
     server_thread = None
     try:
         server, server_thread = start_bridge_server()
+        enrollment_stop_event.clear()
+        enrollment_thread = threading.Thread(target=enrollment_worker, daemon=True)
+        enrollment_thread.start()
         print("Waiting for Arduino connection and fingerprint scans...\n")
         while True:
             if ser is None or not ser.is_open:
@@ -443,6 +549,7 @@ def main():
     except KeyboardInterrupt:
         print("\nFingerprint bridge stopped.")
     finally:
+        enrollment_stop_event.set()
         if server is not None:
             server.shutdown()
             server.server_close()

@@ -2,15 +2,15 @@
 
 namespace Tests\Feature;
 
-use App\Models\AttendanceRecord;
-use App\Models\Employee;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Http;
-use App\Models\User;
 use App\Events\AttendanceUpdated;
+use App\Models\Employee;
+use App\Models\FingerprintEnrollmentOperation;
+use App\Models\User;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcast;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class SecurityHardeningPhase4Test extends TestCase
@@ -118,6 +118,71 @@ class SecurityHardeningPhase4Test extends TestCase
         });
     }
 
+    public function test_admin_enrollment_is_claimed_by_a_signed_bridge_and_maps_the_employee(): void
+    {
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        $employee = $this->fingerprintEmployeeWithoutMapping();
+
+        $start = $this->actingAs($admin)
+            ->postJson('/api/admin/iot/fingerprint-enrollments', ['employee_id' => $employee->id])
+            ->assertStatus(202)
+            ->assertJsonPath('data.status', FingerprintEnrollmentOperation::STATUS_PENDING);
+        $operationId = $start->json('data.id');
+        $this->assertNotEmpty($operationId);
+
+        $this->signedDevicePost('/api/iot/fingerprint-enrollment/jobs/claim', [])
+            ->assertOk()
+            ->assertJsonPath('data.id', $operationId)
+            ->assertJsonPath('data.fingerprint_id', 1);
+
+        $this->signedDevicePost("/api/iot/fingerprint-enrollment/jobs/{$operationId}/complete", [
+            'ok' => true,
+            'message' => 'ENROLL_OK:1',
+        ])->assertOk()->assertJsonPath('data.status', FingerprintEnrollmentOperation::STATUS_SUCCEEDED);
+
+        $this->assertDatabaseHas('employees', ['id' => $employee->id, 'fingerprint_id' => 1]);
+    }
+
+    public function test_enrollment_rejects_non_admins_and_duplicate_active_operations(): void
+    {
+        $manager = User::factory()->create(['role' => User::ROLE_MANAGER]);
+        $employee = $this->fingerprintEmployeeWithoutMapping();
+
+        $this->actingAs($manager)
+            ->postJson('/api/admin/iot/fingerprint-enrollments', ['employee_id' => $employee->id])
+            ->assertForbidden();
+
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        $this->actingAs($admin)
+            ->postJson('/api/admin/iot/fingerprint-enrollments', ['employee_id' => $employee->id])
+            ->assertStatus(202);
+        $this->actingAs($admin)
+            ->postJson('/api/admin/iot/fingerprint-enrollments', ['employee_id' => $employee->id])
+            ->assertConflict();
+    }
+
+    public function test_failed_enrollment_does_not_map_the_employee_and_completion_is_idempotent(): void
+    {
+        $admin = User::factory()->create(['role' => User::ROLE_ADMIN]);
+        $employee = $this->fingerprintEmployeeWithoutMapping();
+        $operationId = $this->actingAs($admin)
+            ->postJson('/api/admin/iot/fingerprint-enrollments', ['employee_id' => $employee->id])
+            ->json('data.id');
+
+        $this->signedDevicePost('/api/iot/fingerprint-enrollment/jobs/claim', [])->assertOk();
+        $this->signedDevicePost("/api/iot/fingerprint-enrollment/jobs/{$operationId}/complete", [
+            'ok' => false,
+            'message' => 'Operation timed out waiting for Arduino.',
+        ])->assertOk()->assertJsonPath('data.status', FingerprintEnrollmentOperation::STATUS_FAILED);
+        $this->assertDatabaseHas('employees', ['id' => $employee->id, 'fingerprint_id' => null]);
+
+        $this->signedDevicePost("/api/iot/fingerprint-enrollment/jobs/{$operationId}/complete", [
+            'ok' => true,
+            'message' => 'ENROLL_OK:1',
+        ])->assertOk()->assertJsonPath('data.status', FingerprintEnrollmentOperation::STATUS_FAILED);
+        $this->assertDatabaseHas('employees', ['id' => $employee->id, 'fingerprint_id' => null]);
+    }
+
     public function test_attendance_updates_are_queued_instead_of_broadcast_synchronously(): void
     {
         $event = new AttendanceUpdated(1, 2, 'fingerprint_time_in');
@@ -197,13 +262,18 @@ class SecurityHardeningPhase4Test extends TestCase
 
     private function signedScan(array $payload, ?string $secret = null, array $overrides = [], ?int $timestamp = null, ?string $nonce = null)
     {
+        return $this->signedDevicePost('/api/iot/attendance/fingerprint', $payload, $secret, $overrides, $timestamp, $nonce);
+    }
+
+    private function signedDevicePost(string $path, array $payload, ?string $secret = null, array $overrides = [], ?int $timestamp = null, ?string $nonce = null)
+    {
         $body = json_encode($payload, JSON_UNESCAPED_SLASHES);
         $timestamp = (string) ($timestamp ?? now()->timestamp);
         $nonce ??= Str::uuid()->toString();
         $secret ??= 'test-iot-device-key';
-        $signature = $this->signature('POST', '/api/iot/attendance/fingerprint', $timestamp, $nonce, $body, $secret);
+        $signature = $this->signature('POST', $path, $timestamp, $nonce, $body, $secret);
 
-        return $this->call('POST', '/api/iot/attendance/fingerprint', [], [], [], array_merge([
+        return $this->call('POST', $path, [], [], [], array_merge([
             'CONTENT_TYPE' => 'application/json',
             'HTTP_ACCEPT' => 'application/json',
             'HTTP_X_DEVICE_ID' => 'mega-as608-01',
@@ -229,6 +299,18 @@ class SecurityHardeningPhase4Test extends TestCase
             'last_name' => 'Employee '.$fingerprintId,
             'position' => 'Staff',
             'status' => $status,
+        ]);
+    }
+
+    private function fingerprintEmployeeWithoutMapping(): Employee
+    {
+        return Employee::create([
+            'employee_code' => 'SEC-UNASSIGNED',
+            'fingerprint_id' => null,
+            'first_name' => 'Unassigned',
+            'last_name' => 'Employee',
+            'position' => 'Staff',
+            'status' => Employee::STATUS_ACTIVE,
         ]);
     }
 }

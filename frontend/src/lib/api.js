@@ -899,6 +899,23 @@ export async function getAdminFingerprintSlot() {
   return response.data.fingerprint_id
 }
 
+export async function startFingerprintEnrollment(employeeId) {
+  await getCsrfCookie()
+  const response = await api.post('/admin/iot/fingerprint-enrollments', { employee_id: employeeId })
+  return response.data.data
+}
+
+export async function getFingerprintEnrollment(operationId) {
+  const response = await api.get(`/admin/iot/fingerprint-enrollments/${operationId}`)
+  return response.data.data
+}
+
+export async function cancelFingerprintEnrollment(operationId) {
+  await getCsrfCookie()
+  const response = await api.post(`/admin/iot/fingerprint-enrollments/${operationId}/cancel`)
+  return response.data.data
+}
+
 export async function assignAdminFingerprint(employeeId, fingerprintId) {
   await getCsrfCookie()
   const response = await api.post(`/admin/employees/${employeeId}/fingerprint`, { fingerprint_id: fingerprintId })
