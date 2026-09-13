@@ -88,6 +88,7 @@ function AdminAttendance() {
   const [fingerprintOperation, setFingerprintOperation] = useState(null)
   const fingerprintActionInFlight = useRef(false)
   const employeeActionHandled = useRef(false)
+  const attendanceLoadInFlight = useRef(false)
 
   const attendanceFilterParams = useMemo(() => ({
     search: filters.search.trim() || undefined,
@@ -102,6 +103,9 @@ function AdminAttendance() {
   }), [employeeFilters])
 
   const loadData = useCallback(async () => {
+    if (attendanceLoadInFlight.current) return
+
+    attendanceLoadInFlight.current = true
     setIsLoading(true)
     setPageError('')
 
@@ -135,6 +139,7 @@ function AdminAttendance() {
       setPageError('Unable to load attendance data right now.')
     } finally {
       setIsLoading(false)
+      attendanceLoadInFlight.current = false
     }
   }, [attendanceFilterParams, employeeFilterParams, totalRecordCount])
 
@@ -158,6 +163,19 @@ function AdminAttendance() {
       channel.stopListening('.AttendanceUpdated', refresh)
       echo.connector.pusher?.connection?.unbind('connected', refresh)
       echo.leave('private-attendance')
+    }
+  }, [loadData])
+
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') void loadData()
+    }
+    const intervalId = window.setInterval(refreshWhenVisible, 10000)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+
+    return () => {
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
   }, [loadData])
 
@@ -487,6 +505,7 @@ function AdminAttendance() {
             {view === 'attendance' ? (
               <>
                 {attendanceHasFilters ? <button type="button" onClick={clearAttendanceFilters}>Clear filters</button> : null}
+                <button type="button" onClick={() => loadData()} disabled={isLoading}>Refresh</button>
                 <button className="primary-button" type="button" onClick={openAttendanceCreate}>
                   + Add Manual Attendance
                 </button>
