@@ -151,6 +151,28 @@ VITE_REVERB_SCHEME=https
 
 If realtime is not deployed, remove those four Vercel variables and keep `BROADCAST_CONNECTION=null` on Railway. The attendance page will use polling/manual refresh and will not fail because of an unavailable local WebSocket.
 
+## Fingerprint attendance bridge
+
+The Arduino bridge must run on the PC physically connected to the sensor. It
+initiates the outbound HTTPS request; Railway does not need access to COM4 or
+the local network. Keep the bridge's development default pointed at the local
+Laravel server, and set this profile on the production-attendance PC:
+
+```text
+DMD_IOT_API_URL=https://dmd-production-5759.up.railway.app/api/iot/attendance/fingerprint
+DMD_IOT_SERIAL_PORT=COM4
+DMD_IOT_DEVICE_ID=mega-as608-01
+DMD_IOT_DEVICE_KEY=<the same private key as Railway IOT_DEVICE_KEY>
+```
+
+Set Railway `IOT_DEVICE_KEY` to a dedicated device key and keep
+`IOT_DEVICE_ID=mega-as608-01` (or the matching default). The bridge signs
+each request with HMAC headers; do not use an administrator browser session or
+commit the device key. The endpoint maps the fingerprint ID to the active
+employee server-side and retains repeat-scan protection. If realtime is not
+available, `/admin/attendance` polls the authenticated attendance API every
+10 seconds and also has a manual Refresh action.
+
 ## Google OAuth setup
 
 The existing routes are:
