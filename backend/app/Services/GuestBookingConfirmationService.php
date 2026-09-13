@@ -8,10 +8,12 @@ use Endroid\QrCode\Builder\Builder;
 use Endroid\QrCode\Encoding\Encoding;
 use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\Writer\PngWriter;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Throwable;
 
 class GuestBookingConfirmationService
@@ -102,7 +104,7 @@ class GuestBookingConfirmationService
         try {
             // Send after the payment transaction has committed. The raw token is
             // available only in memory here and is never persisted or logged.
-            Mail::to($reservation->guest_email)->send(new GuestBookingConfirmationMail($booking, $bookingUrl));
+            $this->sendViaBrevo($reservation, $booking, $bookingUrl);
         } catch (Throwable $exception) {
             $reservation->forceFill([
                 'guest_confirmation_email_status' => 'failed',
@@ -125,6 +127,76 @@ class GuestBookingConfirmationService
         ])->save();
 
         return 'sent';
+    }
+
+    /**
+     * @param array<string, string|int|null> $booking
+     */
+    private function sendViaBrevo(Reservation $reservation, array $booking, string $bookingUrl): void
+    {
+        $apiKey = config('services.brevo.api_key');
+        if (! is_string($apiKey) || $apiKey === '') {
+            throw new RuntimeException('Brevo API key is not configured.');
+        }
+
+        $mail = new GuestBookingConfirmationMail($booking, $bookingUrl);
+        $response = Http::withHeaders([
+            'accept' => 'application/json',
+            'api-key' => $apiKey,
+            'content-type' => 'application/json',
+        ])
+            ->connectTimeout((int) config('services.brevo.connect_timeout', 5))
+            ->timeout((int) config('services.brevo.timeout', 10))
+            // Retry only connection failures. Brevo receives the same
+            // idempotency key on each attempt, so an accepted request cannot
+            // create a second confirmation email.
+            ->retry(2, 250, fn (Throwable $exception): bool => $exception instanceof ConnectionException, throw: false)
+            ->post(config('services.brevo.endpoint'), [
+                'sender' => [
+                    'email' => (string) config('mail.from.address'),
+                    'name' => (string) config('mail.from.name'),
+                ],
+                'to' => [[
+                    'email' => $reservation->guest_email,
+                    'name' => trim(implode(' ', array_filter([
+                        $reservation->guest_first_name,
+                        $reservation->guest_last_name,
+                    ]))),
+                ]],
+                'subject' => $mail->envelope()->subject,
+                'htmlContent' => $mail->render(),
+                'attachment' => [[
+                    'name' => 'booking-qr.png',
+                    'content' => base64_encode((string) $booking['qr_image']),
+                ]],
+                'headers' => [
+                    'idempotencyKey' => $this->confirmationIdempotencyKey($reservation),
+                ],
+            ]);
+
+        if ($response->status() !== 201 || ! is_string($response->json('messageId'))) {
+            throw new RuntimeException('Brevo API did not accept the confirmation email.');
+        }
+
+        Log::info('Guest booking confirmation accepted by Brevo.', [
+            'reservation_id' => $reservation->id,
+            'booking_reference' => $reservation->booking_reference,
+            'brevo_message_id' => $response->json('messageId'),
+        ]);
+    }
+
+    private function confirmationIdempotencyKey(Reservation $reservation): string
+    {
+        $hex = hash('sha256', 'dmd-guest-confirmation:'.$reservation->id.':'.$reservation->guest_access_token_hash);
+
+        return sprintf(
+            '%s-%s-5%s-8%s-%s',
+            substr($hex, 0, 8),
+            substr($hex, 8, 4),
+            substr($hex, 12, 3),
+            substr($hex, 15, 3),
+            substr($hex, 18, 12),
+        );
     }
 
     /**

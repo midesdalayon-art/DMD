@@ -186,7 +186,7 @@ Add that local callback separately in Google Cloud if local OAuth testing is nee
 
 Registration creates an unverified customer, sends a six-digit verification code, and supports resend and cancellation. Verification, resend, and cancellation are API routes protected by throttles and do not expose the code in API responses. Successful verification returns the user to the frontend verification flow.
 
-Configure a real SMTP/API mail transport on Railway using `MAIL_MAILER`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SCHEME`, `MAIL_FROM_ADDRESS`, and `MAIL_FROM_NAME`. The sender address must be verified by the provider. `MAIL_MAILER=log` is local-only and is not sufficient for the production registration demo.
+Guest booking confirmations use the Brevo HTTPS API so Railway SMTP egress is not required. Configure `BREVO_API_KEY` in Railway, keep `MAIL_FROM_ADDRESS` and `MAIL_FROM_NAME` set to a verified Brevo sender, and keep `BREVO_API_URL=https://api.brevo.com/v3/smtp/email`. The API key must never be placed in Vercel or committed. Local development can continue using the existing `MAIL_MAILER=log` or SMTP settings; `MAIL_MAILER=log` is local-only for production transactional delivery.
 
 ## PayMongo test payments
 

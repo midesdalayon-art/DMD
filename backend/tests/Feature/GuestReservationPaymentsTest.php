@@ -2,20 +2,25 @@
 
 namespace Tests\Feature;
 
-use App\Mail\GuestBookingConfirmationMail;
 use App\Models\Accommodation;
 use App\Models\Reservation;
 use App\Models\ReservationPayment;
 use App\Services\GuestBookingConfirmationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Mail;
-use RuntimeException;
 use Tests\TestCase;
 
 class GuestReservationPaymentsTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config()->set('services.brevo.api_key', 'test-brevo-key');
+    }
 
     public function test_guest_can_create_deposit_checkout_without_an_account_or_client_amount(): void
     {
@@ -188,7 +193,6 @@ class GuestReservationPaymentsTest extends TestCase
 
     public function test_verified_guest_deposit_confirms_reservation_and_is_available_without_account(): void
     {
-        Mail::fake();
         [$reservation, $token] = $this->createGuestReservation();
         $payment = ReservationPayment::create([
             'reservation_id' => $reservation->id,
@@ -220,6 +224,7 @@ class GuestReservationPaymentsTest extends TestCase
                     ]],
                 ],
             ]]),
+            'api.brevo.com/v3/smtp/email' => Http::response(['messageId' => 'brevo-deposit-message'], 201),
         ]);
 
         $status = $this->withHeader('X-Guest-Checkout-Token', $token)
@@ -240,14 +245,20 @@ class GuestReservationPaymentsTest extends TestCase
             'id' => $reservation->id,
             'guest_confirmation_email_status' => 'sent',
         ]);
-        Mail::assertSent(GuestBookingConfirmationMail::class, function (GuestBookingConfirmationMail $mail) use ($reservation, $accessToken) {
-            $rendered = $mail->render();
+        Http::assertSent(function (Request $request) use ($reservation, $accessToken) {
+            $payload = $request->data();
+            $qrAttachment = $payload['attachment'][0] ?? [];
+            $qrContent = base64_decode((string) ($qrAttachment['content'] ?? ''), true);
 
-            return $mail->hasTo('juan@example.com')
-                && str_contains($rendered, $reservation->booking_reference)
-                && str_contains($rendered, '/guest/booking/'.$accessToken)
-                && str_contains($rendered, 'data:image/png;base64,')
-                && ! str_contains($rendered, $reservation->fresh()->guest_access_token_hash);
+            return str_contains($request->url(), 'api.brevo.com/v3/smtp/email')
+                && $payload['to'][0]['email'] === 'juan@example.com'
+                && str_contains($payload['htmlContent'], $reservation->booking_reference)
+                && str_contains($payload['htmlContent'], '/guest/booking/'.$accessToken)
+                && str_contains($payload['htmlContent'], 'data:image/png;base64,')
+                && $qrAttachment['name'] === 'booking-qr.png'
+                && is_string($qrContent)
+                && strlen($qrContent) > 0
+                && isset($payload['headers']['idempotencyKey']);
         });
 
         $this->withHeader('X-Guest-Access-Token', $accessToken)
@@ -348,7 +359,6 @@ class GuestReservationPaymentsTest extends TestCase
 
     public function test_verified_guest_full_payment_confirms_reservation_as_fully_paid(): void
     {
-        Mail::fake();
         [$reservation, $token] = $this->createGuestReservation();
         $payment = ReservationPayment::create([
             'reservation_id' => $reservation->id,
@@ -380,6 +390,7 @@ class GuestReservationPaymentsTest extends TestCase
                     ]],
                 ],
             ]]),
+            'api.brevo.com/v3/smtp/email' => Http::response(['messageId' => 'brevo-full-message'], 201),
         ]);
 
         $this->withHeader('X-Guest-Checkout-Token', $token)
@@ -396,7 +407,10 @@ class GuestReservationPaymentsTest extends TestCase
             ->getJson("/api/guest/payments/reservations/{$reservation->id}/status")
             ->assertOk();
 
-        Mail::assertSent(GuestBookingConfirmationMail::class, 1);
+        Http::assertSent(function (Request $request) {
+            return str_contains($request->url(), 'api.brevo.com/v3/smtp/email')
+                && $request->data()['attachment'][0]['name'] === 'booking-qr.png';
+        });
         $this->assertDatabaseHas('reservations', [
             'id' => $reservation->id,
             'guest_confirmation_email_status' => 'sent',
@@ -405,7 +419,6 @@ class GuestReservationPaymentsTest extends TestCase
 
     public function test_paid_guest_with_existing_access_token_still_sends_pending_confirmation(): void
     {
-        Mail::fake();
         [$reservation, $checkoutToken] = $this->createGuestReservation();
         $existingAccessToken = str_repeat('a', 64);
 
@@ -426,6 +439,10 @@ class GuestReservationPaymentsTest extends TestCase
             'paid_at' => now(),
         ]);
 
+        Http::fake([
+            'api.brevo.com/v3/smtp/email' => Http::response(['messageId' => 'brevo-existing-token-message'], 201),
+        ]);
+
         $response = $this->withHeader('X-Guest-Checkout-Token', $checkoutToken)
             ->getJson("/api/guest/payments/reservations/{$reservation->id}/status")
             ->assertOk()
@@ -435,12 +452,14 @@ class GuestReservationPaymentsTest extends TestCase
         $this->assertIsString($newAccessToken);
         $this->assertSame(64, strlen($newAccessToken));
         $this->assertNotSame($existingAccessToken, $newAccessToken);
-        Mail::assertSent(GuestBookingConfirmationMail::class, 1);
+        Http::assertSent(function (Request $request) {
+            return str_contains($request->url(), 'api.brevo.com/v3/smtp/email')
+                && $request->data()['attachment'][0]['name'] === 'booking-qr.png';
+        });
     }
 
     public function test_paid_guest_confirmation_resend_is_idempotent(): void
     {
-        Mail::fake();
         [$reservation] = $this->createGuestReservation();
 
         $reservation->forceFill(['status' => Reservation::STATUS_CONFIRMED])->save();
@@ -454,16 +473,19 @@ class GuestReservationPaymentsTest extends TestCase
             'paid_at' => now(),
         ]);
 
+        Http::fake([
+            'api.brevo.com/v3/smtp/email' => Http::response(['messageId' => 'brevo-resend-message'], 201),
+        ]);
+
         $confirmations = app(GuestBookingConfirmationService::class);
 
         $this->assertSame('sent', $confirmations->resendForPaidGuest($reservation));
         $this->assertSame('sent', $confirmations->resendForPaidGuest($reservation->fresh()));
-        Mail::assertSent(GuestBookingConfirmationMail::class, 1);
+        Http::assertSentCount(1);
     }
 
     public function test_mail_failure_does_not_undo_verified_guest_payment(): void
     {
-        Mail::shouldReceive('to')->once()->andThrow(new RuntimeException('SMTP unavailable'));
         [$reservation, $token] = $this->createGuestReservation();
         $payment = ReservationPayment::create([
             'reservation_id' => $reservation->id,
@@ -495,6 +517,7 @@ class GuestReservationPaymentsTest extends TestCase
                     ]],
                 ],
             ]]),
+            'api.brevo.com/v3/smtp/email' => Http::response(['message' => 'sender rejected'], 400),
         ]);
 
         $this->withHeader('X-Guest-Checkout-Token', $token)

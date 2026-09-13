@@ -28,6 +28,13 @@ return [
         'key' => env('RESEND_KEY'),
     ],
 
+    'brevo' => [
+        'api_key' => env('BREVO_API_KEY'),
+        'endpoint' => env('BREVO_API_URL', 'https://api.brevo.com/v3/smtp/email'),
+        'timeout' => (int) env('BREVO_API_TIMEOUT', 10),
+        'connect_timeout' => (int) env('BREVO_API_CONNECT_TIMEOUT', 5),
+    ],
+
     'paymongo' => [
         'public_key' => env('PAYMONGO_PUBLIC_KEY'),
         'secret_key' => env('PAYMONGO_SECRET_KEY'),
