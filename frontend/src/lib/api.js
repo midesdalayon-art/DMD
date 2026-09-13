@@ -5,6 +5,10 @@ const apiBaseURL = import.meta.env.VITE_API_BASE_URL ?? '/api'
 const apiRootURL = apiBaseURL.startsWith('/')
   ? window.location.origin
   : apiBaseURL.replace(/\/api\/?$/, '')
+const configuredApiTimeoutMs = Number(import.meta.env.VITE_API_TIMEOUT_MS)
+const apiTimeoutMs = Number.isFinite(configuredApiTimeoutMs) && configuredApiTimeoutMs > 0
+  ? configuredApiTimeoutMs
+  : 45000
 const assetOrigin = import.meta.env.VITE_ASSET_BASE_URL
   ?? (import.meta.env.DEV ? 'http://127.0.0.1:8000' : window.location.origin)
 
@@ -45,6 +49,7 @@ export function redirectToGoogle() {
 
 const api = axios.create({
   baseURL: apiBaseURL,
+  timeout: apiTimeoutMs,
   withCredentials: true,
   withXSRFToken: true,
   xsrfCookieName: 'XSRF-TOKEN',
@@ -166,6 +171,7 @@ api.get = (url, config = {}) => {
 
 export async function getCsrfCookie() {
   await axios.get(`${apiRootURL}/sanctum/csrf-cookie`, {
+    timeout: apiTimeoutMs,
     withCredentials: true,
     withXSRFToken: true,
     xsrfCookieName: 'XSRF-TOKEN',
