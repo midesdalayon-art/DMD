@@ -1,9 +1,11 @@
 <?php
 
+use App\Models\AccommodationImage;
+use App\Models\Reservation;
+use App\Services\AccommodationImageOptimizer;
+use App\Services\GuestBookingConfirmationService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
-use App\Models\AccommodationImage;
-use App\Services\AccommodationImageOptimizer;
 use Illuminate\Support\Facades\Schedule;
 
 Schedule::command('reservations:expire-pending')->everyMinute()->withoutOverlapping();
@@ -42,3 +44,24 @@ Artisan::command('accommodations:optimize-images', function (AccommodationImageO
 
     $this->components->info("Done. Processed: {$processed}, skipped: {$skipped}, failed: {$failed}");
 })->purpose('Generate optimized WebP variants for accommodation images');
+
+Artisan::command('guest:resend-confirmation {reservation}', function (GuestBookingConfirmationService $confirmations) {
+    $reservation = Reservation::query()->findOrFail((int) $this->argument('reservation'));
+    $status = $confirmations->resendForPaidGuest($reservation);
+
+    if ($status === 'sent') {
+        $this->components->info('Guest booking confirmation sent.');
+
+        return 0;
+    }
+
+    if ($status === 'sending') {
+        $this->components->warn('A guest booking confirmation is already being sent.');
+
+        return 0;
+    }
+
+    $this->components->error('Reservation is not eligible for a paid guest confirmation.');
+
+    return 1;
+})->purpose('Send one idempotent confirmation email for a paid guest reservation');

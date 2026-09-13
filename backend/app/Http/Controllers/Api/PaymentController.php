@@ -6,15 +6,17 @@ use App\Http\Controllers\Controller;
 use App\Models\Reservation;
 use App\Models\ReservationPayment;
 use App\Services\AuditLogger;
+use App\Services\GuestBookingConfirmationService;
 use App\Services\PayMongoService;
+use App\Services\ReservationQrService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
-use Illuminate\Validation\Rule;
-use Illuminate\Support\Str;
 
 class PaymentController extends Controller
 {
@@ -579,7 +581,7 @@ class PaymentController extends Controller
         return $reservation;
     }
 
-    private function ensureGuestAccessToken(Reservation $reservation): array
+    private function ensureGuestAccessToken(Reservation $reservation, bool $forConfirmation = false): array
     {
         if (
             $reservation->user_id !== null
@@ -588,7 +590,14 @@ class PaymentController extends Controller
             return [$reservation, null];
         }
 
-        if ($reservation->guest_access_token_hash && ! $reservation->guest_access_token_revoked_at) {
+        $confirmationAlreadyHandled = $reservation->guest_confirmation_email_sent_at
+            || in_array($reservation->guest_confirmation_email_status, ['sent', 'sending', 'failed'], true);
+
+        if (
+            $reservation->guest_access_token_hash
+            && ! $reservation->guest_access_token_revoked_at
+            && (! $forConfirmation || $confirmationAlreadyHandled)
+        ) {
             return [$reservation, null];
         }
 
@@ -597,6 +606,11 @@ class PaymentController extends Controller
             'guest_access_token_hash' => hash('sha256', $rawToken),
             'guest_access_token_issued_at' => now(),
             'guest_access_token_revoked_at' => null,
+            ...($forConfirmation ? [
+                'guest_confirmation_email_status' => 'sending',
+                'guest_confirmation_email_sent_at' => null,
+                'guest_confirmation_email_failed_at' => null,
+            ] : []),
         ])->save();
 
         return [$reservation->fresh(['payment', 'accommodation'])->loadPaymentSummary(), $rawToken];
@@ -611,7 +625,7 @@ class PaymentController extends Controller
         if ($accessMode === 'temporary_guest' || $accessMode === 'permanent_guest') {
             [$reservation, $guestAccessToken, $qrToken] = DB::transaction(function () use ($reservation) {
                 $lockedReservation = Reservation::query()->whereKey($reservation->id)->lockForUpdate()->firstOrFail();
-                [$lockedReservation, $guestAccessToken] = $this->ensureGuestAccessToken($lockedReservation);
+                [$lockedReservation, $guestAccessToken] = $this->ensureGuestAccessToken($lockedReservation, true);
                 $issuedQr = $guestAccessToken
                     ? app(\App\Services\ReservationQrService::class)
                         ->issueForGuestAccess($lockedReservation, $guestAccessToken)
@@ -624,7 +638,7 @@ class PaymentController extends Controller
             });
 
             if ($guestAccessToken) {
-                $guestConfirmationEmailStatus = app(\App\Services\GuestBookingConfirmationService::class)
+                $guestConfirmationEmailStatus = app(GuestBookingConfirmationService::class)
                     ->sendIfNeeded($reservation, $guestAccessToken, $qrToken);
             } else {
                 $guestConfirmationEmailStatus = $reservation->guest_confirmation_email_status;
@@ -673,15 +687,19 @@ class PaymentController extends Controller
                 return [$lockedReservation, null, null];
             }
 
-            [$reservation, $rawToken] = $this->ensureGuestAccessToken($lockedReservation);
-            $qr = app(\App\Services\ReservationQrService::class)
+            [$reservation, $rawToken] = $this->ensureGuestAccessToken($lockedReservation, true);
+            if (! $rawToken) {
+                return [$reservation, null, null];
+            }
+
+            $qr = app(ReservationQrService::class)
                 ->issueForGuestAccess($reservation, $rawToken);
 
             return [$qr['reservation'], $rawToken, $qr['token']];
         });
 
         if ($reservation && $rawToken) {
-            app(\App\Services\GuestBookingConfirmationService::class)
+            app(GuestBookingConfirmationService::class)
                 ->sendIfNeeded($reservation, $rawToken, $qrToken);
         }
     }

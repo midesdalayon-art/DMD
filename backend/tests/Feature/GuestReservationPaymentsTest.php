@@ -6,6 +6,7 @@ use App\Mail\GuestBookingConfirmationMail;
 use App\Models\Accommodation;
 use App\Models\Reservation;
 use App\Models\ReservationPayment;
+use App\Services\GuestBookingConfirmationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
@@ -400,6 +401,64 @@ class GuestReservationPaymentsTest extends TestCase
             'id' => $reservation->id,
             'guest_confirmation_email_status' => 'sent',
         ]);
+    }
+
+    public function test_paid_guest_with_existing_access_token_still_sends_pending_confirmation(): void
+    {
+        Mail::fake();
+        [$reservation, $checkoutToken] = $this->createGuestReservation();
+        $existingAccessToken = str_repeat('a', 64);
+
+        $reservation->forceFill([
+            'status' => Reservation::STATUS_CONFIRMED,
+            'guest_access_token_hash' => hash('sha256', $existingAccessToken),
+            'guest_access_token_issued_at' => now(),
+            'guest_confirmation_email_status' => null,
+        ])->save();
+
+        ReservationPayment::create([
+            'reservation_id' => $reservation->id,
+            'purpose' => ReservationPayment::PURPOSE_FULL,
+            'provider' => 'paymongo',
+            'amount' => 500000,
+            'currency' => 'PHP',
+            'status' => ReservationPayment::STATUS_PAID,
+            'paid_at' => now(),
+        ]);
+
+        $response = $this->withHeader('X-Guest-Checkout-Token', $checkoutToken)
+            ->getJson("/api/guest/payments/reservations/{$reservation->id}/status")
+            ->assertOk()
+            ->assertJsonPath('guest_confirmation_email_status', 'sent');
+
+        $newAccessToken = $response->json('guest_access_token');
+        $this->assertIsString($newAccessToken);
+        $this->assertSame(64, strlen($newAccessToken));
+        $this->assertNotSame($existingAccessToken, $newAccessToken);
+        Mail::assertSent(GuestBookingConfirmationMail::class, 1);
+    }
+
+    public function test_paid_guest_confirmation_resend_is_idempotent(): void
+    {
+        Mail::fake();
+        [$reservation] = $this->createGuestReservation();
+
+        $reservation->forceFill(['status' => Reservation::STATUS_CONFIRMED])->save();
+        ReservationPayment::create([
+            'reservation_id' => $reservation->id,
+            'purpose' => ReservationPayment::PURPOSE_FULL,
+            'provider' => 'paymongo',
+            'amount' => 500000,
+            'currency' => 'PHP',
+            'status' => ReservationPayment::STATUS_PAID,
+            'paid_at' => now(),
+        ]);
+
+        $confirmations = app(GuestBookingConfirmationService::class);
+
+        $this->assertSame('sent', $confirmations->resendForPaidGuest($reservation));
+        $this->assertSame('sent', $confirmations->resendForPaidGuest($reservation->fresh()));
+        Mail::assertSent(GuestBookingConfirmationMail::class, 1);
     }
 
     public function test_mail_failure_does_not_undo_verified_guest_payment(): void

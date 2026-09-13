@@ -8,12 +8,69 @@ use Endroid\QrCode\Builder\Builder;
 use Endroid\QrCode\Encoding\Encoding;
 use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\Writer\PngWriter;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
 use Throwable;
 
 class GuestBookingConfirmationService
 {
+    public function resendForPaidGuest(Reservation $reservation): string
+    {
+        [$reservation, $guestAccessToken, $qrToken, $status] = DB::transaction(function () use ($reservation) {
+            $lockedReservation = Reservation::query()
+                ->whereKey($reservation->id)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (
+                $lockedReservation->user_id !== null
+                || $lockedReservation->status !== Reservation::STATUS_CONFIRMED
+                || ! $lockedReservation->guest_email
+            ) {
+                return [$lockedReservation, null, null, 'not_sent'];
+            }
+
+            if ($lockedReservation->guest_confirmation_email_status === 'sent'
+                || $lockedReservation->guest_confirmation_email_sent_at) {
+                return [$lockedReservation, null, null, 'sent'];
+            }
+
+            // A concurrent sender owns this delivery attempt. Do not create a
+            // second email while its synchronous SMTP call is in progress.
+            if ($lockedReservation->guest_confirmation_email_status === 'sending') {
+                return [$lockedReservation, null, null, 'sending'];
+            }
+
+            $lockedReservation->loadPaymentSummary();
+            if ($lockedReservation->paymentState() === 'unpaid') {
+                return [$lockedReservation, null, null, 'not_sent'];
+            }
+
+            $guestAccessToken = Str::random(64);
+            $lockedReservation->forceFill([
+                'guest_access_token_hash' => hash('sha256', $guestAccessToken),
+                'guest_access_token_issued_at' => now(),
+                'guest_access_token_revoked_at' => null,
+                'guest_confirmation_email_status' => 'sending',
+                'guest_confirmation_email_sent_at' => null,
+                'guest_confirmation_email_failed_at' => null,
+            ])->save();
+
+            $issuedQr = app(ReservationQrService::class)
+                ->issueForGuestAccess($lockedReservation, $guestAccessToken);
+
+            return [$issuedQr['reservation'], $guestAccessToken, $issuedQr['token'], null];
+        });
+
+        if (! $guestAccessToken) {
+            return $status;
+        }
+
+        return $this->sendIfNeeded($reservation, $guestAccessToken, $qrToken);
+    }
+
     public function sendIfNeeded(Reservation $reservation, string $guestAccessToken, ?string $qrToken = null): string
     {
         if (
