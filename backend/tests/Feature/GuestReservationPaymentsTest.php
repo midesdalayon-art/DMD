@@ -254,10 +254,11 @@ class GuestReservationPaymentsTest extends TestCase
                 && $payload['to'][0]['email'] === 'juan@example.com'
                 && str_contains($payload['htmlContent'], $reservation->booking_reference)
                 && str_contains($payload['htmlContent'], '/guest/booking/'.$accessToken)
-                && str_contains($payload['htmlContent'], 'data:image/png;base64,')
+                && ! str_contains($payload['htmlContent'], 'cid:')
+                && ! str_contains($payload['htmlContent'], 'embedData')
                 && $qrAttachment['name'] === 'booking-qr.png'
                 && is_string($qrContent)
-                && strlen($qrContent) > 0
+                && str_starts_with($qrContent, "\x89PNG\r\n\x1a\n")
                 && isset($payload['headers']['idempotencyKey']);
         });
 
@@ -482,6 +483,37 @@ class GuestReservationPaymentsTest extends TestCase
         $this->assertSame('sent', $confirmations->resendForPaidGuest($reservation));
         $this->assertSame('sent', $confirmations->resendForPaidGuest($reservation->fresh()));
         Http::assertSentCount(1);
+    }
+
+    public function test_paid_guest_confirmation_can_be_explicitly_resent_once_after_a_previous_delivery(): void
+    {
+        [$reservation] = $this->createGuestReservation();
+
+        $reservation->forceFill(['status' => Reservation::STATUS_CONFIRMED])->save();
+        ReservationPayment::create([
+            'reservation_id' => $reservation->id,
+            'purpose' => ReservationPayment::PURPOSE_FULL,
+            'provider' => 'paymongo',
+            'amount' => 500000,
+            'currency' => 'PHP',
+            'status' => ReservationPayment::STATUS_PAID,
+            'paid_at' => now(),
+        ]);
+
+        Http::fake([
+            'api.brevo.com/v3/smtp/email' => Http::response(['messageId' => 'brevo-repair-message'], 201),
+        ]);
+
+        $confirmations = app(GuestBookingConfirmationService::class);
+        $this->assertSame('sent', $confirmations->resendForPaidGuest($reservation));
+        $this->assertSame('sent', $confirmations->resendForPaidGuest($reservation->fresh(), true));
+        Http::assertSentCount(2);
+        $this->assertSame(1, ReservationPayment::query()->where('reservation_id', $reservation->id)->count());
+        $this->assertDatabaseHas('reservations', [
+            'id' => $reservation->id,
+            'status' => Reservation::STATUS_CONFIRMED,
+            'guest_confirmation_email_status' => 'sent',
+        ]);
     }
 
     public function test_mail_failure_does_not_undo_verified_guest_payment(): void

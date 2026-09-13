@@ -18,9 +18,9 @@ use Throwable;
 
 class GuestBookingConfirmationService
 {
-    public function resendForPaidGuest(Reservation $reservation): string
+    public function resendForPaidGuest(Reservation $reservation, bool $force = false): string
     {
-        [$reservation, $guestAccessToken, $qrToken, $status] = DB::transaction(function () use ($reservation) {
+        [$reservation, $guestAccessToken, $qrToken, $status] = DB::transaction(function () use ($reservation, $force) {
             $lockedReservation = Reservation::query()
                 ->whereKey($reservation->id)
                 ->lockForUpdate()
@@ -34,8 +34,8 @@ class GuestBookingConfirmationService
                 return [$lockedReservation, null, null, 'not_sent'];
             }
 
-            if ($lockedReservation->guest_confirmation_email_status === 'sent'
-                || $lockedReservation->guest_confirmation_email_sent_at) {
+            if (! $force && ($lockedReservation->guest_confirmation_email_status === 'sent'
+                || $lockedReservation->guest_confirmation_email_sent_at)) {
                 return [$lockedReservation, null, null, 'sent'];
             }
 

@@ -25,7 +25,7 @@
             <div style="margin:24px 0;padding:18px;text-align:center;background:#f8faf7;border:1px solid #e2e8e1;border-radius:10px;">
                 <h2 style="margin:0 0 8px;font-size:18px;color:#193d31;">Your Booking QR Code</h2>
                 <p style="margin:0 0 14px;color:#66756d;font-size:13px;">Present this QR code to the Front Desk during check-in for booking verification.</p>
-                <img src="{{ $message->embedData($booking['qr_image'], 'booking-qr.png', 'image/png') }}" alt="Booking verification QR code" width="260" height="260" style="display:block;width:260px;height:260px;margin:0 auto 14px;">
+                <p style="margin:0 0 14px;color:#66756d;font-size:13px;"><strong>Booking QR attached:</strong> Open the attached <strong>booking-qr.png</strong> file and present it to the Front Desk during check-in.</p>
                 <p style="margin:0;color:#66756d;font-size:12px;"><strong>Booking Reference:</strong><br><span style="color:#193d31;font-size:14px;font-weight:700;">{{ $booking['booking_reference'] }}</span></p>
             </div>
 
