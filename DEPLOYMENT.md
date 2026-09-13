@@ -102,6 +102,7 @@ GOOGLE_REDIRECT_URI=https://dmd-production-5759.up.railway.app/auth/google/callb
 MAIL_MAILER=<smtp provider>
 MAIL_HOST=<smtp host>
 MAIL_PORT=<smtp port>
+MAIL_TIMEOUT=10
 MAIL_USERNAME=<smtp username>
 MAIL_PASSWORD=<smtp password>
 MAIL_SCHEME=<tls or smtps, as required by provider>
