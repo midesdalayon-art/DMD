@@ -147,6 +147,8 @@ function AdminAttendance() {
   }, [loadData])
 
   useEffect(() => {
+    if (!echo) return undefined
+
     const channel = echo.private('attendance')
     const refresh = () => { loadData() }
     channel.listen('.AttendanceUpdated', refresh)

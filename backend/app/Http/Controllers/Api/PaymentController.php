@@ -666,6 +666,13 @@ class PaymentController extends Controller
                 return [null, null, null];
             }
 
+            // Registered customers already have their reservation history in
+            // the authenticated account. Guest access credentials and the
+            // guest confirmation email apply only to anonymous bookings.
+            if ($lockedReservation->user_id !== null) {
+                return [$lockedReservation, null, null];
+            }
+
             [$reservation, $rawToken] = $this->ensureGuestAccessToken($lockedReservation);
             $qr = app(\App\Services\ReservationQrService::class)
                 ->issueForGuestAccess($reservation, $rawToken);

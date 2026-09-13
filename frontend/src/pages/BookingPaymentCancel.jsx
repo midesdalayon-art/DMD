@@ -66,7 +66,7 @@ function BookingPaymentCancel() {
 
         const fallbackPath = accommodationPath(snapshot?.accommodation)
         if (fallbackPath) {
-          const isTemporaryGuestReservation = fallbackReservation?.guest?.id == null
+          const isTemporaryGuestReservation = snapshot?.guest?.id == null
           const credentialRejected = isTemporaryGuestReservation
             && (!guestCheckoutToken || [401, 403].includes(requestError?.response?.status))
           navigate(fallbackPath, {
