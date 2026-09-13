@@ -184,9 +184,9 @@ export async function getCsrfCookie() {
 
 export async function login(credentials) {
   await getCsrfCookie()
-  const response = await api.post('/login', credentials)
+  await api.post('/login', credentials)
 
-  return response.data.user
+  return getCurrentUser()
 }
 
 export async function register(accountDetails) {
@@ -310,6 +310,11 @@ export async function getReservations() {
 }
 
 let paymentHistoryRequest = null
+
+export function clearApiCaches() {
+  inFlightGetRequests.clear()
+  paymentHistoryRequest = null
+}
 
 export async function getPaymentHistory({ force = false } = {}) {
   if (!force && paymentHistoryRequest) return paymentHistoryRequest

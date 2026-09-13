@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  clearApiCaches,
   getCurrentUser,
   login as loginRequest,
   logout as logoutRequest,
@@ -8,10 +9,16 @@ import {
 } from '../lib/api'
 import { AuthContext } from './authContext'
 import { logDevDiagnostic } from '../lib/devDiagnostics'
+import { publishAuthChange, subscribeToAuthChanges } from '../lib/authSync'
 
 let currentUserRequest = null
 
-function getCurrentUserOnce() {
+function getCurrentUserOnce(force = false) {
+  if (force) {
+    logDevDiagnostic('auth:user:start', { deduplicated: false, forced: true })
+    return getCurrentUser()
+  }
+
   if (!currentUserRequest) {
     logDevDiagnostic('auth:user:start', { deduplicated: false })
     currentUserRequest = getCurrentUser().finally(() => {
@@ -30,14 +37,26 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true)
   const [isSigningOut, setIsSigningOut] = useState(false)
   const [authError, setAuthError] = useState(null)
+  const authRequestVersion = useRef(0)
+  const authSyncVersion = useRef(0)
 
-  const refreshUser = useCallback(async () => {
+  const refreshUser = useCallback(async ({ force = false } = {}) => {
+    const requestVersion = ++authRequestVersion.current
+
     try {
-      const currentUser = await getCurrentUserOnce()
+      const currentUser = await getCurrentUserOnce(force)
+      if (requestVersion !== authRequestVersion.current) {
+        return null
+      }
+
       logDevDiagnostic('auth:state', { state: 'authenticated', role: currentUser?.role ?? null })
       setUser(currentUser)
       return currentUser
     } catch (error) {
+      if (requestVersion !== authRequestVersion.current) {
+        return null
+      }
+
       logDevDiagnostic('auth:user:error', {
         status: error?.response?.status ?? null,
         code: error?.code ?? null,
@@ -58,28 +77,50 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let isMounted = true
 
-    async function loadUser() {
-      logDevDiagnostic('auth:provider:load-start')
+    async function synchronizeAuth(message) {
+      const syncVersion = ++authSyncVersion.current
+      clearApiCaches()
+      setAuthError(null)
+      setUser(null)
+      setIsSigningOut(message.type === 'logout')
+      setIsLoading(true)
+
       try {
-        const currentUser = await refreshUser()
-        if (isMounted) {
-          setUser(currentUser)
-        }
+        await refreshUser({ force: true })
       } catch {
-        // Preserve the existing session state on transient failures. The
-        // protected route will show a retry state instead of redirecting.
+        // refreshUser records transient failures for ProtectedRoute.
       } finally {
-        logDevDiagnostic('auth:provider:load-finish')
-        if (isMounted) {
+        if (isMounted && syncVersion === authSyncVersion.current) {
+          setIsSigningOut(false)
           setIsLoading(false)
         }
       }
     }
 
+    async function loadUser() {
+      logDevDiagnostic('auth:provider:load-start')
+      try {
+        await refreshUser()
+      } catch {
+        // Preserve the existing session state on transient failures. The
+        // protected route will show a retry state instead of redirecting.
+      } finally {
+        logDevDiagnostic('auth:provider:load-finish')
+        if (isMounted && authSyncVersion.current === 0) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    const unsubscribe = subscribeToAuthChanges((message) => {
+      void synchronizeAuth(message)
+    })
+
     loadUser()
 
     return () => {
       isMounted = false
+      unsubscribe()
       logDevDiagnostic('auth:provider:unmount')
     }
   }, [refreshUser])
@@ -89,6 +130,8 @@ export function AuthProvider({ children }) {
     setUser(authenticatedUser)
     setAuthError(null)
     setIsSigningOut(false)
+    clearApiCaches()
+    publishAuthChange('login')
 
     return authenticatedUser
   }, [])
@@ -110,6 +153,8 @@ export function AuthProvider({ children }) {
     } finally {
       setUser(null)
       setAuthError(null)
+      clearApiCaches()
+      publishAuthChange('logout')
     }
   }, [])
 
