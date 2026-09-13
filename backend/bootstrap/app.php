@@ -17,6 +17,12 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->statefulApi();
+        $middleware->redirectGuestsTo(function (Request $request) {
+            // API clients must receive Laravel's JSON 401 response instead of
+            // attempting to redirect to the default web login route, which is
+            // intentionally not part of this API-only authentication surface.
+            return $request->is('api/*') ? null : route('login');
+        });
         $middleware->alias([
             'role' => EnsureUserHasRole::class,
             'iot.device' => AuthenticateIotDevice::class,
