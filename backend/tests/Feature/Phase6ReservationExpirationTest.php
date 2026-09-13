@@ -181,7 +181,7 @@ class Phase6ReservationExpirationTest extends TestCase
                                 'amount' => 1000000,
                                 'currency' => 'PHP',
                                 'payment_method_type' => 'card',
-                                'paid_at' => '2026-09-07T10:14:00+08:00',
+                                'paid_at' => CarbonImmutable::parse('2026-09-07T10:14:00+08:00')->timestamp,
                             ],
                         ]],
                     ],

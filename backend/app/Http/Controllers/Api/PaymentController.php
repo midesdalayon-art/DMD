@@ -757,8 +757,12 @@ class PaymentController extends Controller
         }
 
         try {
-            return CarbonImmutable::parse((string) $normalized['paid_at'], config('app.timezone'))
-                ->lte($reservation->expires_at);
+            $paidAt = $normalized['paid_at'];
+            $paidAtTime = is_numeric($paidAt) && (int) $paidAt > 0
+                ? CarbonImmutable::createFromTimestamp((int) $paidAt, config('app.timezone'))
+                : CarbonImmutable::parse((string) $paidAt, config('app.timezone'));
+
+            return $paidAtTime->lte($reservation->expires_at);
         } catch (\Throwable) {
             return false;
         }
