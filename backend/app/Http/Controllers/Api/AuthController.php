@@ -6,11 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Mail\EmailVerificationCode;
 use App\Models\User;
 use App\Services\SystemSettings;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
@@ -402,6 +404,43 @@ class AuthController extends Controller
         $expiresInMinutes = (int) config('auth.email_verification.expire_minutes', 10);
 
         try {
+            $brevoApiKey = config('services.brevo.api_key');
+
+            if (is_string($brevoApiKey) && $brevoApiKey !== '') {
+                $mail = new EmailVerificationCode($user, $code, $expiresInMinutes);
+                $response = Http::withHeaders([
+                    'accept' => 'application/json',
+                    'api-key' => $brevoApiKey,
+                    'content-type' => 'application/json',
+                ])
+                    ->connectTimeout((int) config('services.brevo.connect_timeout', 5))
+                    ->timeout((int) config('services.brevo.timeout', 10))
+                    ->retry(2, 250, fn (\Throwable $exception): bool => $exception instanceof ConnectionException, throw: false)
+                    ->post(config('services.brevo.endpoint'), [
+                        'sender' => [
+                            'email' => (string) config('mail.from.address'),
+                            'name' => (string) config('mail.from.name'),
+                        ],
+                        'to' => [[
+                            'email' => $user->email,
+                            'name' => $user->name,
+                        ]],
+                        'subject' => $mail->envelope()->subject,
+                        'htmlContent' => $mail->render(),
+                    ]);
+
+                if ($response->status() !== 201 || ! is_string($response->json('messageId'))) {
+                    throw new \RuntimeException('Brevo API did not accept the verification email.');
+                }
+
+                Log::info('Email verification accepted by Brevo.', [
+                    'user_id' => $user->id,
+                    'brevo_message_id' => $response->json('messageId'),
+                ]);
+
+                return true;
+            }
+
             Mail::to($user->email)->send(new EmailVerificationCode($user, $code, $expiresInMinutes));
 
             return true;

@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Mail\EmailVerificationCode;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Mail;
 use Tests\TestCase;
 
@@ -28,6 +30,28 @@ class EmailVerificationTest extends TestCase
         $user = User::where('email', 'new-customer@example.com')->firstOrFail();
         $this->assertNull($user->email_verified_at);
         $this->assertTrue(Hash::check($this->verificationCode(), $user->email_verification_code_hash));
+    }
+
+    public function test_registration_uses_brevo_https_when_an_api_key_is_configured(): void
+    {
+        config(['services.brevo.api_key' => 'test-brevo-api-key']);
+        Http::fake([
+            'api.brevo.com/v3/smtp/email' => Http::response(['messageId' => 'verification-message'], 201),
+        ]);
+
+        $response = $this->postJson('/api/register', $this->registrationData('brevo-customer@example.com'));
+
+        $response->assertCreated()
+            ->assertJsonMissingPath('verification_code')
+            ->assertJsonPath('email_verification_required', true);
+
+        Http::assertSent(function (HttpRequest $request): bool {
+            $payload = $request->data();
+
+            return $request->hasHeader('api-key', 'test-brevo-api-key')
+                && $payload['to'][0]['email'] === 'brevo-customer@example.com'
+                && preg_match('/>\s*[0-9]{6}\s*</', $payload['htmlContent']) === 1;
+        });
     }
 
     public function test_valid_code_verifies_the_customer_and_clears_the_code(): void
