@@ -120,7 +120,12 @@ class PayMongoService
             });
 
         $timestamp = $parts->get('t');
-        $signature = $parts->get(app()->environment('local', 'testing') ? 'te' : 'li');
+        $decodedPayload = json_decode($rawBody, true);
+        $livemode = data_get($decodedPayload, 'data.attributes.livemode');
+        $signatureKey = is_bool($livemode)
+            ? ($livemode ? 'li' : 'te')
+            : (app()->environment('local', 'testing') ? 'te' : 'li');
+        $signature = $parts->get($signatureKey);
 
         if (! $timestamp || ! $signature) {
             return false;
@@ -143,15 +148,16 @@ class PayMongoService
     public function normalizeWebhookPayload(array $payload): array
     {
         $event = $payload['data'] ?? [];
-        $eventType = $event['type'] ?? $payload['type'] ?? null;
-        $eventData = $event['data'] ?? [];
+        $eventAttributes = $event['attributes'] ?? [];
+        $eventType = $eventAttributes['type'] ?? $event['type'] ?? $payload['type'] ?? null;
+        $eventData = $eventAttributes['data'] ?? $event['data'] ?? [];
         $attributes = $eventData['attributes'] ?? [];
         $resourceId = $eventData['id'] ?? $attributes['reference_number'] ?? null;
         $payments = $attributes['payments'] ?? [];
         $payment = $payments[0] ?? [];
 
         return [
-            'event_id' => $payload['id'] ?? sha1(json_encode($payload)),
+            'event_id' => $payload['id'] ?? $event['id'] ?? sha1(json_encode($payload)),
             'event_type' => $eventType,
             'resource_id' => $resourceId,
             'checkout_session_id' => $eventData['id'] ?? null,

@@ -182,6 +182,67 @@ class PayMongoPaymentsTest extends TestCase
         ]);
     }
 
+    public function test_webhook_accepts_paymongo_event_envelope_and_uses_payload_mode_for_signature(): void
+    {
+        Carbon::setTestNow('2026-08-25 10:00:00');
+        config()->set('services.paymongo.webhook_secret', 'whsec_test_secret');
+
+        $guest = User::factory()->create(['role' => User::ROLE_GUEST]);
+        $reservation = $this->createReservation($guest);
+        $payment = $this->createPayment($reservation, ReservationPayment::STATUS_PENDING, [
+            'checkout_session_id' => 'cs_test_current_envelope',
+        ]);
+
+        $payload = [
+            'data' => [
+                'id' => 'evt_test_current_envelope',
+                'type' => 'event',
+                'attributes' => [
+                    'type' => 'checkout_session.payment.paid',
+                    'livemode' => true,
+                    'data' => [
+                        'id' => 'cs_test_current_envelope',
+                        'type' => 'checkout_session',
+                        'attributes' => [
+                            'reference_number' => $reservation->booking_reference,
+                            'payments' => [[
+                                'id' => 'pay_test_current_envelope',
+                                'attributes' => [
+                                    'amount' => 500000,
+                                    'currency' => 'PHP',
+                                    'payment_method_type' => 'card',
+                                    'paid_at' => '2026-08-25T10:00:00+08:00',
+                                    'status' => 'paid',
+                                ],
+                            ]],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+
+        $body = json_encode($payload, JSON_THROW_ON_ERROR);
+        $timestamp = (string) now()->timestamp;
+        $signature = hash_hmac('sha256', $timestamp.'.'.$body, 'whsec_test_secret');
+
+        $this->postJson('/api/webhooks/paymongo', $payload, [
+            'Paymongo-Signature' => "t={$timestamp},li={$signature}",
+        ])->assertOk();
+
+        $this->assertDatabaseHas('reservation_payments', [
+            'id' => $payment->id,
+            'status' => ReservationPayment::STATUS_PAID,
+            'payment_id' => 'pay_test_current_envelope',
+        ]);
+        $this->assertDatabaseHas('reservations', [
+            'id' => $reservation->id,
+            'status' => Reservation::STATUS_CONFIRMED,
+        ]);
+        $this->assertDatabaseHas('paymongo_webhook_events', [
+            'event_id' => 'evt_test_current_envelope',
+        ]);
+    }
+
     public function test_duplicate_webhook_is_idempotent(): void
     {
         Carbon::setTestNow('2026-08-25 10:00:00');
